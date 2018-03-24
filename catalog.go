@@ -1,38 +1,49 @@
 package main
 
 import (
-	"os"
 	"encoding/gob"
 	"fmt"
 	"io/ioutil"
+	"os"
+	"sync"
 )
 
 const (
 	stateActive = iota
-	stateDone = iota
+	stateDone   = iota
 	statePaused = iota
 )
 
 type Movie struct {
-	Name string
-	Size int64
-	State int
+	Name   string
+	Size   int64
+	State  int
 	Magnet string
 }
 
 type Catalog struct {
-	Quota int64
+	Quota     int64
 	SpaceUsed int64
-	Movies []Movie
-	path string
-	storage string
+	Movies    []Movie
+	path      string
+	storage   string
+	guard     *sync.Mutex
 }
 
 func NewCatalog(catalogPath string, storagePath string, quota int64) *Catalog {
-	return &Catalog{Quota:quota,path:catalogPath,storage:storagePath}
+	return &Catalog{Quota: quota, path: catalogPath, storage: storagePath, guard: &sync.Mutex{}}
+}
+
+func (c *Catalog) AddMovie(m Movie) {
+	c.guard.Lock()
+	defer c.guard.Unlock()
+	c.Movies = append(c.Movies, m)
+	c.save()
 }
 
 func (c Catalog) save() error {
+	c.guard.Lock()
+	defer c.guard.Unlock()
 	file, err := os.Create(c.path)
 	if err == nil {
 		encoder := gob.NewEncoder(file)
@@ -43,6 +54,8 @@ func (c Catalog) save() error {
 }
 
 func (c *Catalog) load() error {
+	c.guard.Lock()
+	defer c.guard.Unlock()
 	file, err := os.Open(c.path)
 	if err == nil {
 		decoder := gob.NewDecoder(file)

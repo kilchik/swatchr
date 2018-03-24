@@ -75,6 +75,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request, catalog *Catalog) {
 		logE.Printf("parse index.html: %v", err)
 		return
 	}
+
 	t.Execute(w, catalog)
 }
 
@@ -93,11 +94,12 @@ func handleAdd(w http.ResponseWriter, r *http.Request, catalog *Catalog) {
 		return
 	}
 
-	go downloadFile(reqExpected.Magnet)
+	go addFile(reqExpected.Magnet, catalog)
 }
 
-func downloadFile(magnet string) {
-	c, _ := torrent.NewClient(nil)
+func addFile(magnet string, catalog *Catalog) {
+	tcfg := &torrent.Config{DataDir: catalog.storage}
+	c, _ := torrent.NewClient(tcfg)
 	defer c.Close()
 	t, _ := c.AddMagnet(magnet)
 	<-t.GotInfo()
@@ -105,6 +107,8 @@ func downloadFile(magnet string) {
 	logD.Println(t.Info().Files)
 	logD.Println(t.Info().Name)
 	logD.Println(t.Info().Length)
+
+	catalog.AddMovie(Movie{Name: t.Name(), Size: t.BytesMissing(), State: stateActive, Magnet: magnet})
 
 	ticker := time.NewTicker(3 * time.Second)
 	go func() {
