@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>swatchr</title>
+    </head>
+    <body>
+        Space used: {{.SpaceUsed}}/{{.Quota}}B
+        <ul>
+        {{range .Movies}}
+        <li>{{.Name}} {{.Size}}</li>
+        {{end}}
+        </ul>
+    </body>
+</html>
