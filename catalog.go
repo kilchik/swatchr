@@ -15,10 +15,11 @@ const (
 )
 
 type Movie struct {
-	Name   string
-	Size   int64
-	State  int
-	Magnet string
+	Name     string
+	Size     int64
+	State    int
+	Magnet   string
+	progress chan int
 }
 
 type Catalog struct {
@@ -42,8 +43,6 @@ func (c *Catalog) AddMovie(m Movie) {
 }
 
 func (c Catalog) save() error {
-	c.guard.Lock()
-	defer c.guard.Unlock()
 	file, err := os.Create(c.path)
 	if err == nil {
 		encoder := gob.NewEncoder(file)

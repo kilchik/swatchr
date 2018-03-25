@@ -2,14 +2,27 @@
 <html lang="en">
     <head>
         <meta charset="UTF-8">
+        {{/*<script src="static/js/script.js"></script>*/}}
         <title>swatchr</title>
     </head>
     <body>
         Space used: {{.SpaceUsed}}/{{.Quota}}B
         <ul>
         {{range .Movies}}
-        <li>{{.Name}} {{.Size}}B</li>
+            <li>{{.Name}} {{.Size}}B {{if eq .State 0}}<div data-id="{{.Name}}" class="progress">%</div>{{end}}</li>
         {{end}}
         </ul>
+
+        <script>
+            var updatesSocket = new WebSocket("ws://localhost:7896/updates");
+            updatesSocket.onopen = function (ev) {
+                updatesSocket.send("Give me the progress!");
+            };
+            updatesSocket.onmessage = function (ev) {
+                let parsed = JSON.parse(ev.data);
+                console.log(JSON.parse(ev.data));
+                document.querySelectorAll(`[data-id="${parsed["MovieName"]}"]`)[0].innerHTML = parsed["Progress"] + "%";
+            };
+        </script>
     </body>
 </html>

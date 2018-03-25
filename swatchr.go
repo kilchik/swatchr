@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
+	"golang.org/x/net/websocket"
 )
 
 var (
@@ -31,20 +32,12 @@ func initLoggers(debugMode bool) {
 	logE = log.New(os.Stderr, "[E] ", log.Ldate|log.Ltime)
 }
 
-type handleFunc func(w http.ResponseWriter, r *http.Request, catalog *Catalog)
-
-type swatchrHandler struct {
-	handle  handleFunc
-	catalog *Catalog
+type Change struct {
+	MovieName string
+	Progress  int
 }
 
-func newSwatchrHandler(handle handleFunc, catalog *Catalog) *swatchrHandler {
-	return &swatchrHandler{handle: handle, catalog: catalog}
-}
-
-func (sh swatchrHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	sh.handle(w, r, sh.catalog)
-}
+var updates = make(chan Change)
 
 func main() {
 	debugMode := flag.Bool("debug", false, "debug logging")
@@ -64,9 +57,31 @@ func main() {
 		logE.Fatalf("initialize catalog: %v", err)
 	}
 
+	go composeUpdates(catalog)
+
 	http.Handle("/", newSwatchrHandler(handleIndex, catalog))
 	http.Handle("/add", newSwatchrHandler(handleAdd, catalog))
+	http.Handle("/updates", websocket.Handler(handleUpdates))
 	logE.Fatalf("listen and serve: %v", http.ListenAndServe(conf.params.ListenAddr, nil))
+}
+
+func composeUpdates(c *Catalog) {
+	t := time.NewTicker(3 * time.Second)
+	for _ = range t.C {
+		for _, mov := range c.Movies {
+			if mov.State == stateActive {
+				select {
+				case pro := <-mov.progress:
+					updates <- Change{
+						MovieName: mov.Name,
+						Progress:  pro,
+					}
+				default:
+					continue
+				}
+			}
+		}
+	}
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request, catalog *Catalog) {
@@ -77,6 +92,17 @@ func handleIndex(w http.ResponseWriter, r *http.Request, catalog *Catalog) {
 	}
 
 	t.Execute(w, catalog)
+}
+
+func handleUpdates(ws *websocket.Conn) {
+	for u := range updates {
+		msg, err := json.Marshal(&u)
+		if err != nil {
+			logE.Printf("encode new update: %v", err)
+			continue
+		}
+		websocket.Message.Send(ws, string(msg))
+	}
 }
 
 func handleAdd(w http.ResponseWriter, r *http.Request, catalog *Catalog) {
@@ -98,29 +124,37 @@ func handleAdd(w http.ResponseWriter, r *http.Request, catalog *Catalog) {
 }
 
 func addFile(magnet string, catalog *Catalog) {
-	tcfg := &torrent.Config{DataDir: catalog.storage}
-	c, _ := torrent.NewClient(tcfg)
-	defer c.Close()
-	t, _ := c.AddMagnet(magnet)
+	tclient, err := torrent.NewClient(nil)
+	if err != nil {
+		logE.Printf("new client: %v", err)
+		return
+	}
+	defer tclient.Close()
+	t, err := tclient.AddMagnet(magnet)
+	if err != nil {
+		logE.Printf("add magnet: %v", err)
+		return
+	}
 	<-t.GotInfo()
+	logD.Println("got info")
 	logD.Println(t.Name())
 	logD.Println(t.Info().Files)
 	logD.Println(t.Info().Name)
 	logD.Println(t.Info().Length)
 
-	catalog.AddMovie(Movie{Name: t.Name(), Size: t.BytesMissing(), State: stateActive, Magnet: magnet})
+	dprogress := make(chan int)
+	catalog.AddMovie(Movie{Name: t.Name(), Size: t.BytesMissing(), State: stateActive, Magnet: magnet, progress: dprogress})
 
 	ticker := time.NewTicker(3 * time.Second)
 	go func() {
 		for _ = range ticker.C {
 			total := float64(t.BytesCompleted() + t.BytesMissing())
-
-			logI.Printf("completed: %f%%", float64(t.BytesCompleted())/total*100)
+			dprogress <- int(float64(t.BytesCompleted()) / total * 100)
 		}
 	}()
 
 	t.DownloadAll()
 
-	c.WaitAll()
+	tclient.WaitAll()
 	logI.Print("done")
 }
