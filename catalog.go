@@ -15,11 +15,12 @@ const (
 )
 
 type Movie struct {
-	Name     string
-	Size     int64
-	State    int
-	Magnet   string
-	progress chan int
+	Title  string
+	Name   string
+	Size   int64
+	State  int
+	Magnet string
+	//progress chan int
 }
 
 type Catalog struct {
@@ -39,7 +40,19 @@ func (c *Catalog) AddMovie(m Movie) {
 	c.guard.Lock()
 	defer c.guard.Unlock()
 	c.Movies = append(c.Movies, m)
+	c.SpaceUsed += m.Size
 	c.save()
+}
+
+func (c *Catalog) AlreadyHas(movieName string) bool {
+	c.guard.Lock()
+	defer c.guard.Unlock()
+	for _, i := range c.Movies {
+		if i.Title == movieName {
+			return true
+		}
+	}
+	return false
 }
 
 func (c Catalog) save() error {

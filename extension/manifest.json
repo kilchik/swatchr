@@ -6,11 +6,18 @@
   "version": "1.0",
 
   "background": {
-    "scripts": ["background.js"],
+    "scripts": ["popup.js"],
     "persistent": false
   },
 
+  "options_page": "options.html",
+
   "permissions": [
-    "tabs", "*://*.rutracker.org/*"
-  ]
+    "tabs", "*://*.rutracker.org/*", "storage"
+  ],
+
+  "browser_action": {
+    "default_icon": "iron-man_gray.png",
+    "default_popup": "popup.html"
+  }
 }

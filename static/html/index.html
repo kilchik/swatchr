@@ -2,27 +2,47 @@
 <html lang="en">
     <head>
         <meta charset="UTF-8">
-        {{/*<script src="static/js/script.js"></script>*/}}
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+        <link href="/static/css/main.css">
+        <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
+    {{/*<script src="static/js/script.js"></script>*/}}
         <title>swatchr</title>
     </head>
     <body>
-        Space used: {{.SpaceUsed}}/{{.Quota}}B
-        <ul>
-        {{range .Movies}}
-            <li>{{.Name}} {{.Size}}B {{if eq .State 0}}<div data-id="{{.Name}}" class="progress">%</div>{{end}}</li>
-        {{end}}
-        </ul>
+        <div class="container">
+            Space used: {{call .PrettifySize .Cat.SpaceUsed}}/{{call .PrettifySize .Cat.Quota}}
+            <ul id="list" class="list-group list-group-flush">
+            {{range .Cat.Movies}}
+                <li class="list-group-item">{{.Name}} <span class="size-str">{{call $.PrettifySize .Size}}</span> {{if eq .State 0}}<div data-id="{{.Title}}" class="progress"></div>{{end}}</li>
+            {{end}}
+            </ul>
 
-        <script>
-            var updatesSocket = new WebSocket("ws://localhost:7896/updates");
-            updatesSocket.onopen = function (ev) {
-                updatesSocket.send("Give me the progress!");
-            };
-            updatesSocket.onmessage = function (ev) {
-                let parsed = JSON.parse(ev.data);
-                console.log(JSON.parse(ev.data));
-                document.querySelectorAll(`[data-id="${parsed["MovieName"]}"]`)[0].innerHTML = parsed["Progress"] + "%";
-            };
-        </script>
+            <script>
+                var updatesSocket = new WebSocket("ws://{{.Conf.Addr}}:{{.Conf.Port}}/updates");
+                // updatesSocket.onopen = function (ev) {
+                //     updatesSocket.send("Give me the progress!");
+                // };
+                updatesSocket.onmessage = function (ev) {
+                    let parsed = JSON.parse(ev.data);
+                    console.log(JSON.parse(ev.data));
+                    switch (parsed["Type"]) {
+                        case 0: // changeTypeMovieAdded
+                            let item = document.createElement("li");
+                            item.setAttribute("class", "list-group-item");
+                            item.innerHTML = `${parsed["Title"]} <span class="size-str">${parsed["SizeStr"]}</span> <span data-id="${parsed["Name"]}" class="progress"></span>`;
+                            document.getElementById("list").appendChild(item);
+                            break;
+                        case 1: // changeTypeProgressChanged
+                            document.querySelectorAll(`[data-id="${parsed["Name"]}"]`)[0].innerHTML = parsed["Progress"] + "%";
+                            break;
+                        case 2: // changeTypeDownloadComplete
+                            document.querySelectorAll(`[data-id="${parsed["Name"]}"]`)[0].innerHTML = "Done";
+                            break;
+                    }
+                };
+            </script>
+        </div>
     </body>
 </html>
