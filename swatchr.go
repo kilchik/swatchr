@@ -40,16 +40,23 @@ func initLoggers(debugMode bool) {
 
 const (
 	changeTypeMovieAdded       = iota
+	changeTypeGotInfo          = iota
 	changeTypeProgressChanged  = iota
 	changeTypeDownloadComplete = iota
 )
 
 type Change struct {
 	Type     int
+	Key      string // magnet link which is supposed to be unique
 	Title    string
 	Name     string
 	SizeStr  string
 	Progress int
+}
+
+func (c Change) String() string {
+	res, _ := json.Marshal(&c)
+	return string(res)
 }
 
 var updates = make(chan Change)
@@ -136,9 +143,7 @@ func handleUpdates(ws *websocket.Conn) {
 			logE.Printf("encode new update: %v", err)
 			continue
 		}
-		log.Println("sending ", string(msg))
 		websocket.Message.Send(ws, string(msg))
-		time.Sleep(1 * time.Second)
 	}
 }
 
@@ -174,30 +179,35 @@ func handleAdd(w http.ResponseWriter, r *http.Request, catalog *Catalog, conf *C
 }
 
 func addFile(title string, magnet string, catalog *Catalog, errChan chan error) {
-	log.Println("adding file")
-
-	//if err != nil {
-	//	logE.Printf("new client: %v", err)
-	//	return
-	//}
 	//defer tclient.Close()
-	log.Println("adding magnet")
 	t, err := tclient.AddMagnet(magnet)
 	if err != nil {
 		logE.Printf("add magnet: %v", err)
 		return
 	}
-	log.Println("successfully added magnet")
-
-	if catalog.AlreadyHas(title) {
-		log.Println("alreadyhas")
-		errChan <- &alreadyExistsError{}
-		return
-	}
+	logD.Println("successfully added magnet")
 	errChan <- nil
 
+	catalog.AddMovie(Movie{Title: title, State: stateIndexing, Magnet: magnet})
+
+	updates <- Change{
+		Type:  changeTypeMovieAdded,
+		Key:   magnet,
+		Title: title,
+	}
+
 	<-t.GotInfo()
-	//logD.Println("got info")
+	sizeTotal := t.BytesCompleted() + t.BytesMissing()
+
+	catalog.AddMovieInfo(magnet, t.Name(), sizeTotal)
+	updates <- Change{
+		Type:     changeTypeGotInfo,
+		Key:      magnet,
+		Name:     t.Name(),
+		SizeStr:  prettifySize(sizeTotal),
+		Progress: 0,
+	}
+
 	//logD.Println(t.Name())
 	//logD.Println(t.Info().Files)
 	//logD.Println(t.Info().Name)
@@ -205,20 +215,8 @@ func addFile(title string, magnet string, catalog *Catalog, errChan chan error) 
 
 	//dprogress := make(chan int)
 
-	log.Println("adding movie")
-	catalog.AddMovie(Movie{Title: title, Name: t.Name(), Size: t.BytesMissing(), State: stateActive, Magnet: magnet})
-	sizeTotal := t.BytesCompleted() + t.BytesMissing()
-	updates <- Change{
-		Type:    changeTypeMovieAdded,
-		Title:   title,
-		Name:    t.Name(),
-		SizeStr: prettifySize(sizeTotal),
-	}
-
-	log.Println("movie added")
-
-	go func(name string) {
-		ticker := time.NewTicker(3 * time.Second)
+	go func(magnet string) {
+		ticker := time.NewTicker(300 * time.Millisecond)
 		start := 3
 		log.Println("starting timer")
 		for _ = range ticker.C {
@@ -226,8 +224,9 @@ func addFile(title string, magnet string, catalog *Catalog, errChan chan error) 
 			//total := float64(t.BytesCompleted() + t.BytesMissing())
 			//dprogress <- int(float64(t.BytesCompleted()) / sizeTotal * 100)
 			var change Change
-			change.Name = name
+			change.Key = magnet
 			if start >= 100 {
+				catalog.ChangeMovieState(magnet, stateDone)
 				change.Type = changeTypeDownloadComplete
 				updates <- change
 				return
@@ -241,7 +240,7 @@ func addFile(title string, magnet string, catalog *Catalog, errChan chan error) 
 			//dprogress <- start
 			start += 2
 		}
-	}(t.Name())
+	}(magnet)
 
 	//t.DownloadAll()
 

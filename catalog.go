@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	stateActive = iota
-	stateDone   = iota
-	statePaused = iota
+	stateIndexing = iota
+	stateActive   = iota
+	stateDone     = iota
+	statePaused   = iota
 )
 
 type Movie struct {
@@ -40,22 +41,47 @@ func (c *Catalog) AddMovie(m Movie) {
 	c.guard.Lock()
 	defer c.guard.Unlock()
 	c.Movies = append(c.Movies, m)
-	c.SpaceUsed += m.Size
-	c.save()
+	c.saveUnsafe()
 }
 
-func (c *Catalog) AlreadyHas(movieName string) bool {
+func (c *Catalog) AddMovieInfo(magnet, name string, size int64) {
 	c.guard.Lock()
 	defer c.guard.Unlock()
-	for _, i := range c.Movies {
-		if i.Title == movieName {
-			return true
-		}
-	}
-	return false
+	pos := c.scanUnsafe(magnet)
+	c.Movies[pos].Name = name
+	c.Movies[pos].State = stateActive
+	c.Movies[pos].Size = size
+	c.SpaceUsed += size
+	c.saveUnsafe()
 }
 
-func (c Catalog) save() error {
+func (c *Catalog) AlreadyHas(magnet string) bool {
+	c.guard.Lock()
+	defer c.guard.Unlock()
+	return c.scanUnsafe(magnet) == -1
+}
+
+func (c *Catalog) ChangeMovieState(movieName string, newState int) error {
+	c.guard.Lock()
+	defer c.guard.Unlock()
+	pos := c.scanUnsafe(movieName)
+	if pos == -1 {
+		return fmt.Errorf("no movie %q found in catalog", movieName)
+	}
+	c.Movies[pos].State = newState
+	return nil
+}
+
+func (c Catalog) scanUnsafe(magnet string) int {
+	for i, m := range c.Movies {
+		if m.Magnet == magnet {
+			return i
+		}
+	}
+	return -1
+}
+
+func (c Catalog) saveUnsafe() error {
 	file, err := os.Create(c.path)
 	if err == nil {
 		encoder := gob.NewEncoder(file)
@@ -97,7 +123,7 @@ func syncCatalog(catalogPath string, storagePath string, quota int64) (*Catalog,
 			c.SpaceUsed += m.Size
 		}
 
-		if err := c.save(); err != nil {
+		if err := c.saveUnsafe(); err != nil {
 			return c, fmt.Errorf("save catalog: %v", err)
 		}
 
