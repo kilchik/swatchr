@@ -45,6 +45,8 @@ const (
 	changeTypeDownloadComplete = iota
 )
 
+const checkProgressTimeout = 1 * time.Second
+
 type Change struct {
 	Type     int
 	Key      string // magnet link which is supposed to be unique
@@ -52,6 +54,7 @@ type Change struct {
 	Name     string
 	SizeStr  string
 	Progress int
+	Estimate int // seconds
 }
 
 func (c Change) String() string {
@@ -216,29 +219,59 @@ func addFile(title string, magnet string, catalog *Catalog, errChan chan error) 
 	//dprogress := make(chan int)
 
 	go func(magnet string) {
-		ticker := time.NewTicker(300 * time.Millisecond)
-		start := 3
+		var velocities []int
+		timePrev := time.Now()
+		progPrev := 1
 		log.Println("starting timer")
+		ticker := time.NewTicker(checkProgressTimeout)
 		for _ = range ticker.C {
 			//log.Println("tick")
 			//total := float64(t.BytesCompleted() + t.BytesMissing())
 			//dprogress <- int(float64(t.BytesCompleted()) / sizeTotal * 100)
+			progNew := progPrev + 1
+			log.Printf("new progress: %v%%", progNew)
+			if progNew-progPrev <= 0 {
+				continue
+			}
+
 			var change Change
 			change.Key = magnet
-			if start >= 100 {
+			if progNew >= 100 {
+				log.Println("download complete")
 				catalog.ChangeMovieState(magnet, stateDone)
 				change.Type = changeTypeDownloadComplete
+				change.Estimate = 0
+				change.SizeStr = prettifySize(sizeTotal)
 				updates <- change
 				return
-			} else {
-				change.Type = changeTypeProgressChanged
-				change.Progress = start
-				updates <- change
 			}
+
+			change.Type = changeTypeProgressChanged
+			timeCur := time.Now()
+			elapsed := timeCur.Second() - timePrev.Second()
+			if elapsed > 0 {
+				velocityRecent := elapsed / (progNew - progPrev) // seconds per 1%
+				log.Printf("recent velocity: %dB/s", velocityRecent)
+				if velocityRecent > 0 {
+					velocities = append(velocities, velocityRecent)
+
+					if len(velocities) >= 3 {
+						velocityCur := avg(velocities[len(velocities)-3:])
+						log.Printf("avg velocity: %d", velocityCur)
+						change.Estimate = (100 - progNew) / velocityCur // s
+					}
+				}
+			}
+
+			change.Progress = progNew
+			log.Printf("estimate: %d sec", change.Estimate)
+			updates <- change
 
 			//log.Println("new change", change)
 			//dprogress <- start
-			start += 2
+
+			timePrev = timeCur
+			progPrev = progNew
 		}
 	}(magnet)
 

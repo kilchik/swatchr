@@ -56,8 +56,28 @@
                     return item;
                 }
 
-                function updateProgress(id, val) {
+                function updateProgress(id, val, estimate) {
                     $(`div[data-id="${id}"]>div.field-last>div`).html(`<div class="progress-bar progress-bar-striped" role="progressbar" style="width: ${val}%" aria-valuenow="${val}" aria-valuemin="0" aria-valuemax="100"></div>`);
+
+                    if (estimate) {
+                        $(`div[data-id="${id}"] span.size-str`).text(prettifyTime(estimate));
+                    } else {
+                        $(`div[data-id="${id}"] span.size-str`).text("");
+                    }
+                }
+
+                function prettifyTime(secs) {
+                    if (secs === 60) {
+                        return "60s"
+                    }
+
+                    let res = "";
+                    if (secs > 60) {
+                        res = Math.floor(secs/60) + "m "
+                    }
+                    res += secs % 60 + "s"
+
+                    return res
                 }
 
                 updatesSocket.onmessage = function (ev) {
@@ -70,17 +90,17 @@
                             break;
                         case 1: // changeTypeGotInfo
                             console.log("changeTypeGotInfo");
-                            $(`div[data-id="${parsed["Key"]}"] span.size-str`).text(parsed["SizeStr"]);
                             updateProgress(parsed["Key"], 1);
                             break;
                         case 2: // changeTypeProgressChanged
                             console.log("progress changed");
-                            updateProgress(parsed["Key"], parsed["Progress"]);
+                            updateProgress(parsed["Key"], parsed["Progress"], parsed["Estimate"]);
                             break;
                         case 3: // changeTypeDownloadComplete
                             console.log("download complete");
                             $(`div[data-id="${parsed["Key"]}"]>div.field-last`).html(`<button type="button" class="btn btn-outline-danger">Delete</button>
 `);
+                            $(`div[data-id="${parsed["Key"]}"] span.size-str`).text(parsed["SizeStr"]);
                             break;
                     }
                 };
