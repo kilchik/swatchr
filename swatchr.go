@@ -116,7 +116,35 @@ func main() {
 	http.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) { w.Header().Set("Access-Control-Allow-Origin", "*") })
 	http.Handle("/add", newSwatchrHandler(handleAdd, catalog, conf))
 	http.Handle("/updates", websocket.Handler(handleUpdates))
+	http.Handle("/remove", newSwatchrHandler(handleRemove, catalog, conf))
 	logE.Fatalf("listen and serve: %v", http.ListenAndServe(fmt.Sprintf(":%d", conf.Params.Port), nil))
+}
+
+func handleRemove(w http.ResponseWriter, r *http.Request, catalog *Catalog, conf *Config) {
+	body, err := ioutil.ReadAll(r.Body)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if err != nil {
+		logI.Printf("read request body: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	var reqExpected struct {
+		Magnet string `json:"key"`
+	}
+	log.Println(string(body))
+	if err := json.Unmarshal(body, &reqExpected); err != nil {
+		logI.Printf("decode request body: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("handle remove of %q", reqExpected)
+
+	if err := catalog.RemoveMovie(reqExpected.Magnet); err != nil {
+		logE.Printf("remove movie: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 }
 
 func prettifySize(size int64) string {
@@ -156,7 +184,6 @@ func handleAdd(w http.ResponseWriter, r *http.Request, catalog *Catalog, conf *C
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	log.Println("body", string(body))
 	var reqExpected struct {
 		Title  string `json:"title"`
 		Magnet string `json:"magnet"`
@@ -191,21 +218,27 @@ func addFile(title string, magnet string, catalog *Catalog, errChan chan error) 
 	logD.Println("successfully added magnet")
 	errChan <- nil
 
-	catalog.AddMovie(Movie{Title: title, State: stateIndexing, Magnet: magnet})
+	var mov *Movie
+	if mov, err = catalog.AddMovie(title, magnet); err != nil {
+		logE.Printf("add movie to catalog: %v", err)
+	}
 
 	updates <- Change{
 		Type:  changeTypeMovieAdded,
-		Key:   magnet,
+		Key:   mov.Btih,
 		Title: title,
 	}
 
 	<-t.GotInfo()
 	sizeTotal := t.BytesCompleted() + t.BytesMissing()
 
-	catalog.AddMovieInfo(magnet, t.Name(), sizeTotal)
+	if err := catalog.AddMovieInfo(mov.Btih, t.Name(), sizeTotal); err != nil {
+		logE.Printf("add movie info: %v", err)
+		return
+	}
 	updates <- Change{
 		Type:     changeTypeGotInfo,
-		Key:      magnet,
+		Key:      mov.Btih,
 		Name:     t.Name(),
 		SizeStr:  prettifySize(sizeTotal),
 		Progress: 0,
@@ -218,7 +251,7 @@ func addFile(title string, magnet string, catalog *Catalog, errChan chan error) 
 
 	//dprogress := make(chan int)
 
-	go func(magnet string) {
+	go func(btih string) {
 		var velocities []int
 		timePrev := time.Now()
 		progPrev := 1
@@ -235,10 +268,10 @@ func addFile(title string, magnet string, catalog *Catalog, errChan chan error) 
 			}
 
 			var change Change
-			change.Key = magnet
+			change.Key = btih
 			if progNew >= 100 {
 				log.Println("download complete")
-				catalog.ChangeMovieState(magnet, stateDone)
+				catalog.ChangeMovieState(btih, stateDone)
 				change.Type = changeTypeDownloadComplete
 				change.Estimate = 0
 				change.SizeStr = prettifySize(sizeTotal)
@@ -273,7 +306,7 @@ func addFile(title string, magnet string, catalog *Catalog, errChan chan error) 
 			timePrev = timeCur
 			progPrev = progNew
 		}
-	}(magnet)
+	}(mov.Btih)
 
 	//t.DownloadAll()
 

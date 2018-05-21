@@ -4,7 +4,7 @@
         <meta charset="UTF-8">
         <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
         <link href="/static/css/main.css">
-        <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
+        <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
         <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
     {{/*<script src="static/js/script.js"></script>*/}}
@@ -15,7 +15,7 @@
             Space used: {{call .PrettifySize .Cat.SpaceUsed}}/{{call .PrettifySize .Cat.Quota}}
 
             {{range .Cat.Movies}}
-                <div data-id="{{.Magnet}}" class="row justify-content-center">
+                <div data-id="{{.Btih}}" class="row justify-content-center">
                     <div class="field-title col-md">{{.Title}}</div>
                     <div class="field-size col-sm">
                         <span class="size-str">
@@ -25,7 +25,7 @@
                         </span></div>
                     <div class="field-last col-sm">
                         {{if eq .State 2}} {{/* stateDone */}}
-                            <button type="button" class="btn btn-outline-danger">Delete</button>
+                            <button type="button" class="btn btn-outline-danger" onclick="removeItem('{{.Btih}}')">Delete</button>
                         {{else}}
                         <div class="progress">
                             {{if eq .State 0}}
@@ -40,6 +40,7 @@
 
             <script>
                 var updatesSocket = new WebSocket("ws://{{.Conf.Addr}}:{{.Conf.Port}}/updates");
+                var removeUrl = "http://{{.Conf.Addr}}:{{.Conf.Port}}/remove";
 
                 function newItem(id, title) {
                     let colName = $("<div></div>").addClass("field-title col-md").text(title);
@@ -54,6 +55,24 @@
                     item.append(colLast);
 
                     return item;
+                }
+                
+                function removeItem(idx) {
+                    console.log(`called removeItem(${idx})`);
+                    console.log("remove stringified", JSON.stringify({btih: idx}));
+                    $.ajax(removeUrl, {
+                                data: `{"key": "${idx}"}`,
+                                dataType: "json",
+                                type: 'POST'
+                            }
+                    )
+                            .done(function () {
+                                console.log("item removed");
+                                $(`div[data-id="${idx}"]`).remove();
+                            })
+                            .fail(function () {
+                                console.log("failed to remove item");
+                            });
                 }
 
                 function updateProgress(id, val, estimate) {
@@ -75,7 +94,7 @@
                     if (secs > 60) {
                         res = Math.floor(secs/60) + "m "
                     }
-                    res += secs % 60 + "s"
+                    res += secs % 60 + "s";
 
                     return res
                 }
@@ -98,7 +117,7 @@
                             break;
                         case 3: // changeTypeDownloadComplete
                             console.log("download complete");
-                            $(`div[data-id="${parsed["Key"]}"]>div.field-last`).html(`<button type="button" class="btn btn-outline-danger">Delete</button>
+                            $(`div[data-id="${parsed["Key"]}"]>div.field-last`).html(`<button type="button" class="btn btn-outline-danger" onclick="removeItem('${parsed["Key"]}')">Delete</button>
 `);
                             $(`div[data-id="${parsed["Key"]}"] span.size-str`).text(parsed["SizeStr"]);
                             break;
